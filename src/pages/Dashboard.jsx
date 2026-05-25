@@ -138,15 +138,24 @@ export default function Dashboard() {
         )}
       </section>
 
-      <button
-        type="button"
-        onClick={() => navigate('/new-session')}
-        className="mt-8 w-full min-h-[56px] rounded-xl bg-slate-900 text-base font-medium text-white shadow-sm hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2"
-      >
-        + Nieuwe training starten
-      </button>
+      <div className="sticky top-0 z-40 -mx-4 mt-4 space-y-2 bg-slate-50 px-4 py-3">
+        <button
+          type="button"
+          onClick={() => navigate('/new-session')}
+          className="w-full min-h-[56px] rounded-xl bg-slate-900 text-base font-medium text-white shadow-sm hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2"
+        >
+          + Nieuwe training starten
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('/group-session')}
+          className="w-full min-h-[56px] rounded-xl border-2 border-slate-900 bg-white text-base font-medium text-slate-900 shadow-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2"
+        >
+          👥 Groepstraining starten
+        </button>
+      </div>
 
-      <section className="mt-10" aria-labelledby="clients-heading">
+      <section className="mt-6" aria-labelledby="clients-heading">
         <h2 id="clients-heading" className="text-lg font-semibold text-slate-900">
           Klanten
         </h2>

@@ -10,7 +10,7 @@ const linkClass = ({ isActive }) =>
 export default function Navbar({ signOut }) {
   return (
     <nav
-      className="shrink-0 border-t border-slate-200 bg-white safe-area-pb"
+      className="fixed bottom-0 left-0 right-0 z-50 w-full shrink-0 border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)]"
       aria-label="Hoofdnavigatie"
     >
       <div className="mx-auto flex max-w-3xl items-stretch">

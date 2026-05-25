@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { fetchLatestOneRmByExercise } from '../lib/oneRm'
 import { computeAdvisedWeight } from '../lib/trainingMath'
 
 function todayIsoDate() {
@@ -9,43 +10,6 @@ function todayIsoDate() {
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
-}
-
-/**
- * @param {string} clientId
- * @returns {Promise<Map<string, number>>} exercise_id -> latest estimated_1rm
- */
-async function fetchLatestOneRmByExercise(clientId) {
-  const { data, error } = await supabase
-    .from('session_exercises')
-    .select(
-      `
-      exercise_id,
-      estimated_1rm,
-      sessions!inner ( date, client_id )
-    `,
-    )
-    .eq('sessions.client_id', clientId)
-    .not('estimated_1rm', 'is', null)
-
-  if (error) throw error
-
-  /** @type {Map<string, { e1: number, date: string }>} */
-  const best = new Map()
-  for (const row of data || []) {
-    const exId = row.exercise_id
-    const e1 = row.estimated_1rm
-    const sess = row.sessions
-    const date = Array.isArray(sess) ? sess[0]?.date : sess?.date
-    if (exId == null || e1 == null || date == null) continue
-    const prev = best.get(exId)
-    if (!prev || String(date) > String(prev.date)) {
-      best.set(exId, { e1: Number(e1), date: String(date) })
-    }
-  }
-  const out = new Map()
-  for (const [id, v] of best) out.set(id, v.e1)
-  return out
 }
 
 export default function NewSession() {
@@ -107,7 +71,7 @@ export default function NewSession() {
 
       const { data: tEx, error: tErr } = await supabase
         .from('template_exercises')
-        .select('exercise_id, target_reps, block, id')
+        .select('exercise_id, target_reps, block, sets, id')
         .eq('workout_template_id', templateId)
         .order('id', { ascending: true })
       if (tErr) throw tErr
@@ -118,7 +82,8 @@ export default function NewSession() {
 
       const oneRmMap = await fetchLatestOneRmByExercise(clientId)
 
-      const rows = tEx.map((row, idx) => {
+      const rows = []
+      tEx.forEach((row, idx) => {
         const targetReps = Number(row.target_reps)
         const prev = oneRmMap.get(row.exercise_id)
         let advised_weight = null
@@ -127,16 +92,21 @@ export default function NewSession() {
         }
         const blockVal = row.block != null ? String(row.block) : 'A'
         const sortOrder = idx
-        return {
-          session_id: sessionId,
-          exercise_id: row.exercise_id,
-          target_reps: targetReps,
-          advised_weight,
-          block: blockVal,
-          sort_order: sortOrder,
-          weight_done: null,
-          reps_done: null,
-          estimated_1rm: null,
+        const numSets = Math.max(1, Number(row.sets) || 3)
+        for (let setNumber = 1; setNumber <= numSets; setNumber += 1) {
+          rows.push({
+            session_id: sessionId,
+            exercise_id: row.exercise_id,
+            target_reps: targetReps,
+            advised_weight,
+            sets: numSets,
+            set_number: setNumber,
+            block: blockVal,
+            sort_order: sortOrder,
+            weight_done: null,
+            reps_done: null,
+            estimated_1rm: null,
+          })
         }
       })
 

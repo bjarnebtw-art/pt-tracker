@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { computeEstimatedOneRm } from '../lib/trainingMath'
-import MiniProgress from '../components/MiniProgress'
+import { computeEstimatedOneRm, defaultSetWeight } from '../lib/trainingMath'
 
 function blockSortKey(block) {
   const b = String(block ?? 'A').trim().toUpperCase()
@@ -39,12 +38,65 @@ function parseNum(s) {
   return Number.isFinite(n) ? n : null
 }
 
+function exerciseGroupKey(row) {
+  return `${row.sort_order ?? 0}-${row.exercise_id}`
+}
+
+function groupRowsIntoExercises(rowList) {
+  const map = new Map()
+  for (const row of rowList) {
+    const key = exerciseGroupKey(row)
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        exercise_id: row.exercise_id,
+        sort_order: row.sort_order,
+        block: row.block,
+        advised_weight: row.advised_weight,
+        target_reps: row.target_reps,
+        totalSets: Math.max(1, Number(row.sets) || 1),
+        name: exerciseName(row),
+        sets: [],
+      })
+    }
+    const g = map.get(key)
+    g.sets.push(row)
+    if (row.advised_weight != null) g.advised_weight = row.advised_weight
+  }
+  for (const g of map.values()) {
+    g.sets.sort((a, b) => (Number(a.set_number) || 1) - (Number(b.set_number) || 1))
+    const maxSets = Math.max(g.totalSets, g.sets.length)
+    g.totalSets = maxSets
+  }
+  return [...map.values()].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+}
+
+function initialFieldForRow(row, totalSets) {
+  const setNum = Number(row.set_number) || 1
+  const reps =
+    row.reps_done != null ? String(row.reps_done) : ''
+  if (row.weight_done != null) {
+    return { weight: String(row.weight_done), reps }
+  }
+  const advised = row.advised_weight
+  if (advised != null && Number.isFinite(Number(advised))) {
+    const w = defaultSetWeight(Number(advised), setNum, totalSets)
+    return { weight: String(w), reps }
+  }
+  return { weight: '', reps }
+}
+
+function isTopsetRow(row, setRows) {
+  const setNum = Number(row.set_number) || 1
+  const maxSetNum = Math.max(1, ...setRows.map((r) => Number(r.set_number) || 1))
+  return setNum >= maxSetNum
+}
+
 export default function SessionLog() {
   const { id: sessionId } = useParams()
   const navigate = useNavigate()
   const [rows, setRows] = useState([])
   const [sessionStatus, setSessionStatus] = useState(null)
-  const [sessionClientId, setSessionClientId] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [saveError, setSaveError] = useState('')
@@ -54,6 +106,7 @@ export default function SessionLog() {
   const fieldsRef = useRef(fields)
   fieldsRef.current = fields
 
+  const rowMetaRef = useRef({})
   const timersRef = useRef({})
 
   const load = useCallback(async () => {
@@ -76,31 +129,38 @@ export default function SessionLog() {
             estimated_1rm,
             block,
             sort_order,
+            set_number,
+            sets,
             exercises ( name )
           `,
           )
           .eq('session_id', sessionId)
-          .order('sort_order', { ascending: true }),
+          .order('sort_order', { ascending: true })
+          .order('set_number', { ascending: true }),
       ])
       if (sRes.error) throw sRes.error
       if (rRes.error) throw rRes.error
       if (!sRes.data) {
         setError('Sessie niet gevonden.')
         setRows([])
-        setSessionClientId(null)
         return
       }
       setSessionStatus(sRes.data.status)
-      setSessionClientId(sRes.data.client_id ?? null)
       const list = rRes.data || []
       setRows(list)
+
+      const exercises = groupRowsIntoExercises(list)
+      const meta = {}
       const next = {}
-      for (const row of list) {
-        next[row.id] = {
-          weight: row.weight_done != null ? String(row.weight_done) : '',
-          reps: row.reps_done != null ? String(row.reps_done) : '',
+      for (const ex of exercises) {
+        for (const row of ex.sets) {
+          next[row.id] = initialFieldForRow(row, ex.totalSets)
+          meta[row.id] = {
+            isTopset: isTopsetRow(row, ex.sets),
+          }
         }
       }
+      rowMetaRef.current = meta
       setFields(next)
     } catch (e) {
       setError(e?.message || 'Kon sessie niet laden.')
@@ -118,8 +178,9 @@ export default function SessionLog() {
     if (!f) return
     const weight = parseNum(f.weight)
     const reps = parseNum(f.reps)
+    const isTopset = rowMetaRef.current[rowId]?.isTopset ?? false
     let estimated_1rm = null
-    if (weight != null && reps != null) {
+    if (isTopset && weight != null && reps != null) {
       estimated_1rm = computeEstimatedOneRm(weight, reps)
     }
     const { error: uErr } = await supabase
@@ -171,14 +232,15 @@ export default function SessionLog() {
   }, [])
 
   const grouped = useMemo(() => {
+    const exercises = groupRowsIntoExercises(rows)
     const map = new Map()
-    for (const row of rows) {
-      const key = normalizeBlockKey(row.block)
+    for (const ex of exercises) {
+      const key = normalizeBlockKey(ex.block)
       if (!map.has(key)) map.set(key, [])
-      map.get(key).push(row)
+      map.get(key).push(ex)
     }
     const keys = [...map.keys()].sort((a, b) => blockSortKey(a) - blockSortKey(b))
-    return keys.map((k) => ({ key: k, title: blockHeading(k), items: map.get(k) }))
+    return keys.map((k) => ({ key: k, title: blockHeading(k), exercises: map.get(k) }))
   }, [rows])
 
   async function handleFinish() {
@@ -276,105 +338,94 @@ export default function SessionLog() {
           <p className="mb-4 text-sm text-slate-500">Deze training is afgerond (alleen lezen).</p>
         ) : null}
 
-        <div className="space-y-8">
+        <div className="space-y-4">
           {grouped.map((group) => {
             const isBlockA = group.key === 'A'
             return (
-            <section
-              key={group.key}
-              className={
-                isBlockA
-                  ? 'rounded-2xl border border-emerald-200/80 bg-emerald-50/50 p-4 sm:p-5 shadow-sm'
-                  : 'rounded-2xl border border-sky-200/90 bg-sky-50/60 p-4 sm:p-5 shadow-sm'
-              }
-            >
-              <h2 className="text-lg font-semibold text-slate-900 mb-4">{group.title}</h2>
-              <ul className="space-y-8">
-                {group.items.map((row) => {
-                  const f = fields[row.id] || { weight: '', reps: '' }
-                  const w = parseNum(f.weight)
-                  const r = parseNum(f.reps)
-                  const showE1 =
-                    w != null && r != null ? computeEstimatedOneRm(w, r).toFixed(1) : null
-                  const hasAdvice =
-                    row.advised_weight != null && Number.isFinite(Number(row.advised_weight))
+              <section
+                key={group.key}
+                className={
+                  isBlockA
+                    ? 'rounded-xl border border-emerald-200/80 bg-emerald-50/50 p-2 shadow-sm'
+                    : 'rounded-xl border border-sky-200/90 bg-sky-50/60 p-2 shadow-sm'
+                }
+              >
+                <h2 className="mb-2 px-1 text-base font-semibold text-slate-900">{group.title}</h2>
+                <ul className="divide-y divide-slate-200/80">
+                  {group.exercises.map((ex) => {
+                    const hasAdvice =
+                      ex.advised_weight != null && Number.isFinite(Number(ex.advised_weight))
+                    const topsetRow = ex.sets[ex.sets.length - 1]
+                    const topsetFields = topsetRow ? fields[topsetRow.id] : null
+                    const tw = topsetFields ? parseNum(topsetFields.weight) : null
+                    const tr = topsetFields ? parseNum(topsetFields.reps) : null
+                    const showE1 =
+                      tw != null && tr != null ? computeEstimatedOneRm(tw, tr).toFixed(1) : null
 
-                  return (
-                    <li key={row.id} className="border-b border-slate-200/80 pb-8 last:border-0 last:pb-0">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <p className="min-w-0 flex-1 text-xl font-semibold text-slate-900 leading-snug">
-                          {exerciseName(row)}
-                        </p>
-                        {sessionClientId && row.exercise_id ? (
-                          <MiniProgress clientId={sessionClientId} exerciseId={row.exercise_id} />
-                        ) : null}
-                      </div>
-                      {hasAdvice ? (
-                        <p className="mt-1 text-base text-emerald-700/90">
-                          Advies: {Number(row.advised_weight)} kg
-                        </p>
-                      ) : (
-                        <p className="mt-1 text-sm text-slate-400">Geen eerdere 1RM voor advies</p>
-                      )}
-
-                      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                        <div>
-                          <label
-                            className="block text-sm font-medium text-slate-600 mb-1.5"
-                            htmlFor={`w-${row.id}`}
-                          >
-                            Weight done (kg)
-                          </label>
-                          <input
-                            id={`w-${row.id}`}
-                            type="number"
-                            inputMode="decimal"
-                            step="0.5"
-                            min="0"
-                            disabled={isDone}
-                            value={f.weight}
-                            onChange={(e) => updateField(row.id, 'weight', e.target.value)}
-                            className="w-full min-h-[48px] rounded-xl border border-slate-200 bg-white px-3 text-lg text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 disabled:bg-slate-100"
-                          />
+                    return (
+                      <li key={ex.key} className="px-1 py-2">
+                        <div className="mb-1">
+                          <p className="text-sm font-bold text-slate-900">{ex.name}</p>
+                          <p className="text-xs text-slate-400">
+                            {hasAdvice
+                              ? `Advies topset: ${Number(ex.advised_weight)} kg`
+                              : 'Advies topset: —'}
+                            {showE1 != null ? (
+                              <span className="text-slate-500"> · e1RM {showE1}</span>
+                            ) : null}
+                          </p>
                         </div>
-                        <div>
-                          <label
-                            className="block text-sm font-medium text-slate-600 mb-1.5"
-                            htmlFor={`r-${row.id}`}
-                          >
-                            Reps done
-                          </label>
-                          <input
-                            id={`r-${row.id}`}
-                            type="number"
-                            inputMode="numeric"
-                            step="1"
-                            min="0"
-                            disabled={isDone}
-                            value={f.reps}
-                            onChange={(e) => updateField(row.id, 'reps', e.target.value)}
-                            className="w-full min-h-[48px] rounded-xl border border-slate-200 bg-white px-3 text-lg text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 disabled:bg-slate-100"
-                          />
-                        </div>
-                      </div>
+                        <ul className="space-y-1">
+                          {ex.sets.map((row) => {
+                            const f = fields[row.id] || { weight: '', reps: '' }
+                            const setNum = Number(row.set_number) || 1
+                            const isTopset = isTopsetRow(row, ex.sets)
 
-                      <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
-                        <span className="text-slate-500">
-                          Target reps:{' '}
-                          <span className="font-medium text-slate-800">{row.target_reps}</span>
-                        </span>
-                        {showE1 != null ? (
-                          <span className="text-slate-700">
-                            Estimated 1RM:{' '}
-                            <span className="font-semibold tabular-nums">{showE1}</span> kg
-                          </span>
-                        ) : null}
-                      </div>
-                    </li>
-                  )
-                })}
-              </ul>
-            </section>
+                            return (
+                              <li
+                                key={row.id}
+                                className={`flex max-h-[44px] items-center gap-2 rounded-lg px-1 py-0.5 ${
+                                  isTopset ? 'border-2 border-emerald-500 bg-white/60' : ''
+                                }`}
+                              >
+                                <span className="w-12 shrink-0 text-xs font-medium text-slate-600">
+                                  Set {setNum}
+                                </span>
+                                <input
+                                  id={`w-${row.id}`}
+                                  type="number"
+                                  inputMode="decimal"
+                                  step="0.5"
+                                  min="0"
+                                  disabled={isDone}
+                                  placeholder="kg"
+                                  aria-label={`Gewicht set ${setNum} ${ex.name}`}
+                                  value={f.weight}
+                                  onChange={(e) => updateField(row.id, 'weight', e.target.value)}
+                                  className="h-9 min-h-0 w-[4.25rem] max-h-[36px] rounded-lg border border-slate-200 bg-white px-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 disabled:bg-slate-100"
+                                />
+                                <input
+                                  id={`r-${row.id}`}
+                                  type="number"
+                                  inputMode="numeric"
+                                  step="1"
+                                  min="0"
+                                  disabled={isDone}
+                                  placeholder="reps"
+                                  aria-label={`Herhalingen set ${setNum} ${ex.name}`}
+                                  value={f.reps}
+                                  onChange={(e) => updateField(row.id, 'reps', e.target.value)}
+                                  className="h-9 min-h-0 w-[4.25rem] max-h-[36px] rounded-lg border border-slate-200 bg-white px-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 disabled:bg-slate-100"
+                                />
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </section>
             )
           })}
         </div>
