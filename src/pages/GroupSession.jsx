@@ -126,6 +126,7 @@ export default function GroupSession() {
   const [blocks, setBlocks] = useState([])
   const [activeClients, setActiveClients] = useState([])
   const [swapOpenKey, setSwapOpenKey] = useState(null)
+  const [swapQuery, setSwapQuery] = useState('')
   const swapRef = useRef(null)
 
   const loadLists = useCallback(async () => {
@@ -159,6 +160,7 @@ export default function GroupSession() {
     function onDocClick(e) {
       if (swapRef.current && !swapRef.current.contains(e.target)) {
         setSwapOpenKey(null)
+        setSwapQuery('')
       }
     }
     document.addEventListener('mousedown', onDocClick)
@@ -168,15 +170,6 @@ export default function GroupSession() {
   const selectedCount = selectedIds.size
   const canStart = selectedCount >= 2 && selectedCount <= 4 && templateId && !starting
 
-  const alternativesByCategory = useMemo(() => {
-    const map = new Map()
-    for (const ex of allExercises) {
-      const cat = ex.category ?? ''
-      if (!map.has(cat)) map.set(cat, [])
-      map.get(cat).push(ex)
-    }
-    return map
-  }, [allExercises])
 
   function toggleClient(id) {
     setSelectedIds((prev) => {
@@ -311,7 +304,6 @@ export default function GroupSession() {
               notesOpen: false,
               confirmed: false,
               topsetRowId: topsetRow?.id ?? null,
-              setRowIds: setRows.map((r) => r.id),
               sessionId: sessionByClient.get(client.id),
             }
           }
@@ -452,116 +444,88 @@ export default function GroupSession() {
 
   async function swapExercise(blockKey, slotKey, newExercise) {
     setSwapOpenKey(null)
+    setSwapQuery('')
     setSaveError('')
 
     const block = blocks.find((b) => b.key === blockKey)
     const slot = block?.exercises.find((e) => e.slotKey === slotKey)
-
-    if (!slot) {
-      setSaveError('Oefening niet gevonden in dit blok.')
-      return
-    }
-
-    if (newExercise.id === slot.exerciseId) return
+    if (!slot || newExercise.id === slot.exerciseId) return
 
     try {
       const oneRmByClient = new Map()
       await Promise.all(
-        activeClients.map(async (client) => {
-          oneRmByClient.set(client.id, await fetchLatestOneRmByExercise(client.id))
+        activeClients.map(async (c) => {
+          oneRmByClient.set(c.id, await fetchLatestOneRmByExercise(c.id))
         }),
       )
 
-      const updates = []
-
       for (const client of activeClients) {
-        const clientState = slot.clients?.[client.id]
-        const setRowIds = clientState?.setRowIds || []
+        const cs = slot.clients[client.id]
+        if (!cs?.sessionId) continue
 
-        if (!setRowIds.length) {
-          continue
+        const prev = oneRmByClient.get(client.id)?.get(newExercise.id)
+        let advised_weight = null
+        if (prev != null && Number.isFinite(prev) && Number.isFinite(slot.targetReps)) {
+          advised_weight = computeAdvisedWeight(prev, slot.targetReps)
         }
 
-        const previousOneRm = oneRmByClient.get(client.id)?.get(newExercise.id)
-        let advisedWeight = null
-
-        if (
-          previousOneRm != null &&
-          Number.isFinite(previousOneRm) &&
-          Number.isFinite(slot.targetReps)
-        ) {
-          advisedWeight = computeAdvisedWeight(previousOneRm, slot.targetReps)
-        }
-
-        for (const rowId of setRowIds) {
-          updates.push({
-            id: rowId,
-            payload: {
-              exercise_id: newExercise.id,
-              advised_weight: advisedWeight,
-              weight_done: null,
-              reps_done: null,
-              estimated_1rm: null,
-              notes: null,
-            },
-          })
-        }
-      }
-
-      if (!updates.length) {
-        throw new Error('Geen gekoppelde trainingsregels gevonden voor deze oefening.')
-      }
-
-      for (const update of updates) {
-        const { error: updateError } = await supabase
+        // Belangrijk: wissel op positie binnen het blok, niet op oude exercise_id.
+        // Daardoor werkt dit ook als de oude oefening al eens gewisseld is.
+        let query = supabase
           .from('session_exercises')
-          .update(update.payload)
-          .eq('id', update.id)
+          .update({
+            exercise_id: newExercise.id,
+            advised_weight,
+            weight_done: null,
+            reps_done: null,
+            estimated_1rm: null,
+            notes: null,
+          })
+          .eq('session_id', cs.sessionId)
+          .eq('sort_order', slot.sortOrder)
 
-        if (updateError) throw updateError
+        if (slot.block != null) {
+          query = query.eq('block', String(slot.block))
+        }
+
+        const { error: uErr } = await query
+        if (uErr) throw uErr
       }
 
-      setBlocks((previousBlocks) =>
-        previousBlocks.map((currentBlock) => {
-          if (currentBlock.key !== blockKey) return currentBlock
-
+      setBlocks((prev) =>
+        prev.map((b) => {
+          if (b.key !== blockKey) return b
           return {
-            ...currentBlock,
-            exercises: currentBlock.exercises.map((exerciseSlot) => {
-              if (exerciseSlot.slotKey !== slotKey) return exerciseSlot
+            ...b,
+            exercises: b.exercises.map((ex) => {
+              if (ex.slotKey !== slotKey) return ex
 
               const nextClients = {}
-
               for (const client of activeClients) {
-                const oldClientState = exerciseSlot.clients?.[client.id]
-                const previousOneRm = oneRmByClient.get(client.id)?.get(newExercise.id)
-
-                let advisedWeight = null
-                if (
-                  previousOneRm != null &&
-                  Number.isFinite(previousOneRm) &&
-                  Number.isFinite(exerciseSlot.targetReps)
-                ) {
-                  advisedWeight = computeAdvisedWeight(previousOneRm, exerciseSlot.targetReps)
+                const prevOneRm = oneRmByClient.get(client.id)?.get(newExercise.id)
+                let advised = null
+                if (prevOneRm != null && Number.isFinite(prevOneRm) && Number.isFinite(ex.targetReps)) {
+                  advised = computeAdvisedWeight(prevOneRm, ex.targetReps)
                 }
-
-                const weights = progressiveWeights(advisedWeight, exerciseSlot.totalSets)
+                const weights = progressiveWeights(advised, ex.totalSets)
                 const topsetDefault = weights[weights.length - 1]
-
+                const old = ex.clients[client.id]
                 nextClients[client.id] = {
-                  ...oldClientState,
-                  advisedWeight,
+                  advisedWeight: advised,
                   weights,
                   topsetWeight: topsetDefault != null ? String(topsetDefault) : '',
                   reps: '',
                   notes: '',
                   notesOpen: false,
                   confirmed: false,
+                  topsetRowId: old?.topsetRowId,
+                  sessionId: old?.sessionId,
                 }
               }
 
               return {
-                ...exerciseSlot,
+                ...ex,
+                slotKey: `${ex.block ?? blockKey}-${ex.sortOrder}-${newExercise.id}`,
                 exerciseId: newExercise.id,
                 name: newExercise.name,
                 category: newExercise.category,
@@ -717,10 +681,11 @@ export default function GroupSession() {
 
                 <div className="grid grid-cols-2 gap-3">
                   {block.exercises.map((slot) => {
-                    const alts = (alternativesByCategory.get(slot.category ?? '') || []).filter(
-                      (ex) => ex.id !== slot.exerciseId,
-                    )
                     const swapOpen = swapOpenKey === slot.slotKey
+                    const q = swapOpen ? swapQuery.trim().toLowerCase() : ''
+                    const alts = allExercises
+                      .filter((ex) => ex.id !== slot.exerciseId)
+                      .filter((ex) => !q || ex.name.toLowerCase().includes(q))
 
                     return (
                       <article
@@ -744,33 +709,50 @@ export default function GroupSession() {
                               type="button"
                               title="Oefening wisselen"
                               aria-expanded={swapOpen}
-                              onClick={() =>
-                                setSwapOpenKey((k) => (k === slot.slotKey ? null : slot.slotKey))
-                              }
+                              onClick={() => {
+                                setSwapOpenKey((k) => {
+                                  const next = k === slot.slotKey ? null : slot.slotKey
+                                  if (!next) setSwapQuery('')
+                                  return next
+                                })
+                              }}
                               className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
                             >
                               <ArrowLeftRight className="h-4 w-4" aria-hidden />
                             </button>
                             {swapOpen ? (
-                              <ul
-                                role="listbox"
-                                className="absolute right-0 z-20 mt-1 max-h-48 min-w-[10rem] overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-lg"
-                              >
-                                {alts.map((alt) => (
-                                  <li key={alt.id}>
-                                    <button
-                                      type="button"
-                                      role="option"
-                                      className="w-full px-3 py-2 text-left text-slate-800 hover:bg-slate-50"
-                                      onClick={() =>
-                                        void swapExercise(block.key, slot.slotKey, alt)
-                                      }
-                                    >
-                                      {alt.name}
-                                    </button>
-                                  </li>
-                                ))}
-                              </ul>
+                              <div className="absolute right-0 z-20 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-2 text-sm shadow-lg">
+                                <input
+                                  type="text"
+                                  autoFocus
+                                  value={swapQuery}
+                                  onChange={(e) => setSwapQuery(e.target.value)}
+                                  placeholder="Zoek oefening..."
+                                  className="mb-2 h-9 w-full rounded-md border border-slate-200 px-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                                />
+                                <ul role="listbox" className="max-h-56 overflow-y-auto">
+                                  {alts.map((alt) => (
+                                    <li key={alt.id}>
+                                      <button
+                                        type="button"
+                                        role="option"
+                                        className="w-full rounded-md px-3 py-2 text-left text-slate-800 hover:bg-slate-50"
+                                        onClick={() =>
+                                          void swapExercise(block.key, slot.slotKey, alt)
+                                        }
+                                      >
+                                        <span className="block font-medium">{alt.name}</span>
+                                        {alt.category ? (
+                                          <span className="block text-xs text-slate-400">{alt.category}</span>
+                                        ) : null}
+                                      </button>
+                                    </li>
+                                  ))}
+                                  {alts.length === 0 ? (
+                                    <li className="px-3 py-2 text-slate-500">Geen oefening gevonden.</li>
+                                  ) : null}
+                                </ul>
+                              </div>
                             ) : null}
                           </div>
                         ) : null}
