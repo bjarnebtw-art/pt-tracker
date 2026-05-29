@@ -311,6 +311,7 @@ export default function GroupSession() {
               notesOpen: false,
               confirmed: false,
               topsetRowId: topsetRow?.id ?? null,
+              setRowIds: setRows.map((r) => r.id),
               sessionId: sessionByClient.get(client.id),
             }
           }
@@ -452,99 +453,115 @@ export default function GroupSession() {
   async function swapExercise(blockKey, slotKey, newExercise) {
     setSwapOpenKey(null)
     setSaveError('')
+
     const block = blocks.find((b) => b.key === blockKey)
     const slot = block?.exercises.find((e) => e.slotKey === slotKey)
-    if (!slot || newExercise.id === slot.exerciseId) return
+
+    if (!slot) {
+      setSaveError('Oefening niet gevonden in dit blok.')
+      return
+    }
+
+    if (newExercise.id === slot.exerciseId) return
 
     try {
-      const rowIds = []
-      for (const client of activeClients) {
-        const cs = slot.clients[client.id]
-        if (!cs?.sessionId) continue
-        const { data: rows, error: qErr } = await supabase
-          .from('session_exercises')
-          .select('id')
-          .eq('session_id', cs.sessionId)
-          .eq('sort_order', slot.sortOrder)
-          .eq('exercise_id', slot.exerciseId)
-        if (qErr) throw qErr
-        for (const r of rows || []) rowIds.push(r.id)
-      }
-
-      if (!rowIds.length) throw new Error('Geen rijen gevonden om te wisselen.')
-
       const oneRmByClient = new Map()
       await Promise.all(
-        activeClients.map(async (c) => {
-          oneRmByClient.set(c.id, await fetchLatestOneRmByExercise(c.id))
+        activeClients.map(async (client) => {
+          oneRmByClient.set(client.id, await fetchLatestOneRmByExercise(client.id))
         }),
       )
 
       const updates = []
+
       for (const client of activeClients) {
-        const prev = oneRmByClient.get(client.id)?.get(newExercise.id)
-        let advised_weight = null
-        if (prev != null && Number.isFinite(prev) && Number.isFinite(slot.targetReps)) {
-          advised_weight = computeAdvisedWeight(prev, slot.targetReps)
+        const clientState = slot.clients?.[client.id]
+        const setRowIds = clientState?.setRowIds || []
+
+        if (!setRowIds.length) {
+          continue
         }
-        const cs = slot.clients[client.id]
-        if (!cs?.sessionId) continue
-        const { data: rows } = await supabase
-          .from('session_exercises')
-          .select('id, set_number')
-          .eq('session_id', cs.sessionId)
-          .eq('sort_order', slot.sortOrder)
-          .eq('exercise_id', slot.exerciseId)
-        for (const row of rows || []) {
+
+        const previousOneRm = oneRmByClient.get(client.id)?.get(newExercise.id)
+        let advisedWeight = null
+
+        if (
+          previousOneRm != null &&
+          Number.isFinite(previousOneRm) &&
+          Number.isFinite(slot.targetReps)
+        ) {
+          advisedWeight = computeAdvisedWeight(previousOneRm, slot.targetReps)
+        }
+
+        for (const rowId of setRowIds) {
           updates.push({
-            id: row.id,
-            exercise_id: newExercise.id,
-            advised_weight,
-            weight_done: null,
-            reps_done: null,
-            estimated_1rm: null,
+            id: rowId,
+            payload: {
+              exercise_id: newExercise.id,
+              advised_weight: advisedWeight,
+              weight_done: null,
+              reps_done: null,
+              estimated_1rm: null,
+              notes: null,
+            },
           })
         }
       }
 
-      for (const u of updates) {
-        const { id, ...payload } = u
-        const { error: uErr } = await supabase.from('session_exercises').update(payload).eq('id', id)
-        if (uErr) throw uErr
+      if (!updates.length) {
+        throw new Error('Geen gekoppelde trainingsregels gevonden voor deze oefening.')
       }
 
-      setBlocks((prev) =>
-        prev.map((b) => {
-          if (b.key !== blockKey) return b
+      for (const update of updates) {
+        const { error: updateError } = await supabase
+          .from('session_exercises')
+          .update(update.payload)
+          .eq('id', update.id)
+
+        if (updateError) throw updateError
+      }
+
+      setBlocks((previousBlocks) =>
+        previousBlocks.map((currentBlock) => {
+          if (currentBlock.key !== blockKey) return currentBlock
+
           return {
-            ...b,
-            exercises: b.exercises.map((ex) => {
-              if (ex.slotKey !== slotKey) return ex
+            ...currentBlock,
+            exercises: currentBlock.exercises.map((exerciseSlot) => {
+              if (exerciseSlot.slotKey !== slotKey) return exerciseSlot
+
               const nextClients = {}
+
               for (const client of activeClients) {
-                const prev = oneRmByClient.get(client.id)?.get(newExercise.id)
-                let advised = null
-                if (prev != null && Number.isFinite(prev) && Number.isFinite(ex.targetReps)) {
-                  advised = computeAdvisedWeight(prev, ex.targetReps)
+                const oldClientState = exerciseSlot.clients?.[client.id]
+                const previousOneRm = oneRmByClient.get(client.id)?.get(newExercise.id)
+
+                let advisedWeight = null
+                if (
+                  previousOneRm != null &&
+                  Number.isFinite(previousOneRm) &&
+                  Number.isFinite(exerciseSlot.targetReps)
+                ) {
+                  advisedWeight = computeAdvisedWeight(previousOneRm, exerciseSlot.targetReps)
                 }
-                const weights = progressiveWeights(advised, ex.totalSets)
+
+                const weights = progressiveWeights(advisedWeight, exerciseSlot.totalSets)
                 const topsetDefault = weights[weights.length - 1]
-                const old = ex.clients[client.id]
-                const topsetRowId = old?.topsetRowId
+
                 nextClients[client.id] = {
-                  advisedWeight: advised,
+                  ...oldClientState,
+                  advisedWeight,
                   weights,
                   topsetWeight: topsetDefault != null ? String(topsetDefault) : '',
                   reps: '',
-                  notes: old?.notes ?? '',
+                  notes: '',
                   notesOpen: false,
                   confirmed: false,
-                  topsetRowId,
-                  sessionId: old?.sessionId,
                 }
               }
+
               return {
-                ...ex,
+                ...exerciseSlot,
                 exerciseId: newExercise.id,
                 name: newExercise.name,
                 category: newExercise.category,
