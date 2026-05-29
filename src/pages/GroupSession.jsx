@@ -125,9 +125,8 @@ export default function GroupSession() {
   const [started, setStarted] = useState(false)
   const [blocks, setBlocks] = useState([])
   const [activeClients, setActiveClients] = useState([])
-  const [swapOpenKey, setSwapOpenKey] = useState(null)
+  const [swapTarget, setSwapTarget] = useState(null)
   const [swapQuery, setSwapQuery] = useState('')
-  const swapRef = useRef(null)
 
   const loadLists = useCallback(async () => {
     setLoadingLists(true)
@@ -154,18 +153,6 @@ export default function GroupSession() {
   useEffect(() => {
     void loadLists()
   }, [loadLists])
-
-  useEffect(() => {
-    if (!swapOpenKey) return
-    function onDocClick(e) {
-      if (swapRef.current && !swapRef.current.contains(e.target)) {
-        setSwapOpenKey(null)
-        setSwapQuery('')
-      }
-    }
-    document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
-  }, [swapOpenKey])
 
   const selectedCount = selectedIds.size
   const canStart = selectedCount >= 2 && selectedCount <= 4 && templateId && !starting
@@ -304,6 +291,7 @@ export default function GroupSession() {
               notesOpen: false,
               confirmed: false,
               topsetRowId: topsetRow?.id ?? null,
+              setRowIds: setRows.map((r) => r.id),
               sessionId: sessionByClient.get(client.id),
             }
           }
@@ -442,9 +430,35 @@ export default function GroupSession() {
     )
   }
 
-  async function swapExercise(blockKey, slotKey, newExercise) {
-    setSwapOpenKey(null)
+  function openSwapModal(blockKey, slotKey, currentName) {
+    setSwapTarget({ blockKey, slotKey, currentName })
     setSwapQuery('')
+  }
+
+  function closeSwapModal() {
+    setSwapTarget(null)
+    setSwapQuery('')
+  }
+
+  async function getFallbackRowIds(sessionId, slot) {
+    if (!sessionId || !slot) return []
+    let query = supabase
+      .from('session_exercises')
+      .select('id')
+      .eq('session_id', sessionId)
+      .eq('sort_order', slot.sortOrder)
+
+    if (slot.block != null) {
+      query = query.eq('block', String(slot.block))
+    }
+
+    const { data, error: qErr } = await query
+    if (qErr) throw qErr
+    return (data || []).map((r) => r.id)
+  }
+
+  async function swapExercise(blockKey, slotKey, newExercise) {
+    closeSwapModal()
     setSaveError('')
 
     const block = blocks.find((b) => b.key === blockKey)
@@ -469,9 +483,15 @@ export default function GroupSession() {
           advised_weight = computeAdvisedWeight(prev, slot.targetReps)
         }
 
-        // Belangrijk: wissel op positie binnen het blok, niet op oude exercise_id.
-        // Daardoor werkt dit ook als de oude oefening al eens gewisseld is.
-        let query = supabase
+        const rowIds = cs.setRowIds?.length
+          ? cs.setRowIds
+          : await getFallbackRowIds(cs.sessionId, slot)
+
+        if (!rowIds.length) {
+          throw new Error(`Geen set-rijen gevonden voor ${client.name}.`)
+        }
+
+        const { error: uErr } = await supabase
           .from('session_exercises')
           .update({
             exercise_id: newExercise.id,
@@ -481,14 +501,8 @@ export default function GroupSession() {
             estimated_1rm: null,
             notes: null,
           })
-          .eq('session_id', cs.sessionId)
-          .eq('sort_order', slot.sortOrder)
+          .in('id', rowIds)
 
-        if (slot.block != null) {
-          query = query.eq('block', String(slot.block))
-        }
-
-        const { error: uErr } = await query
         if (uErr) throw uErr
       }
 
@@ -519,13 +533,13 @@ export default function GroupSession() {
                   notesOpen: false,
                   confirmed: false,
                   topsetRowId: old?.topsetRowId,
+                  setRowIds: old?.setRowIds || [],
                   sessionId: old?.sessionId,
                 }
               }
 
               return {
                 ...ex,
-                slotKey: `${ex.block ?? blockKey}-${ex.sortOrder}-${newExercise.id}`,
                 exerciseId: newExercise.id,
                 name: newExercise.name,
                 category: newExercise.category,
@@ -681,12 +695,6 @@ export default function GroupSession() {
 
                 <div className="grid grid-cols-2 gap-3">
                   {block.exercises.map((slot) => {
-                    const swapOpen = swapOpenKey === slot.slotKey
-                    const q = swapOpen ? swapQuery.trim().toLowerCase() : ''
-                    const alts = allExercises
-                      .filter((ex) => ex.id !== slot.exerciseId)
-                      .filter((ex) => !q || ex.name.toLowerCase().includes(q))
-
                     return (
                       <article
                         key={slot.slotKey}
@@ -703,59 +711,14 @@ export default function GroupSession() {
                           ) : null}
                         </div>
 
-                        {alts.length > 0 ? (
-                          <div className="absolute right-2 top-2" ref={swapRef}>
-                            <button
-                              type="button"
-                              title="Oefening wisselen"
-                              aria-expanded={swapOpen}
-                              onClick={() => {
-                                setSwapOpenKey((k) => {
-                                  const next = k === slot.slotKey ? null : slot.slotKey
-                                  if (!next) setSwapQuery('')
-                                  return next
-                                })
-                              }}
-                              className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
-                            >
-                              <ArrowLeftRight className="h-4 w-4" aria-hidden />
-                            </button>
-                            {swapOpen ? (
-                              <div className="absolute right-0 z-20 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-2 text-sm shadow-lg">
-                                <input
-                                  type="text"
-                                  autoFocus
-                                  value={swapQuery}
-                                  onChange={(e) => setSwapQuery(e.target.value)}
-                                  placeholder="Zoek oefening..."
-                                  className="mb-2 h-9 w-full rounded-md border border-slate-200 px-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
-                                />
-                                <ul role="listbox" className="max-h-56 overflow-y-auto">
-                                  {alts.map((alt) => (
-                                    <li key={alt.id}>
-                                      <button
-                                        type="button"
-                                        role="option"
-                                        className="w-full rounded-md px-3 py-2 text-left text-slate-800 hover:bg-slate-50"
-                                        onClick={() =>
-                                          void swapExercise(block.key, slot.slotKey, alt)
-                                        }
-                                      >
-                                        <span className="block font-medium">{alt.name}</span>
-                                        {alt.category ? (
-                                          <span className="block text-xs text-slate-400">{alt.category}</span>
-                                        ) : null}
-                                      </button>
-                                    </li>
-                                  ))}
-                                  {alts.length === 0 ? (
-                                    <li className="px-3 py-2 text-slate-500">Geen oefening gevonden.</li>
-                                  ) : null}
-                                </ul>
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : null}
+                        <button
+                          type="button"
+                          title="Oefening wisselen"
+                          onClick={() => openSwapModal(block.key, slot.slotKey, slot.name)}
+                          className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                        >
+                          <ArrowLeftRight className="h-4 w-4" aria-hidden />
+                        </button>
 
                         <ul className="mt-3 space-y-2">
                           {activeClients.map((client) => {
@@ -899,6 +862,68 @@ export default function GroupSession() {
           })}
         </div>
       </div>
+
+      {swapTarget ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 px-3 py-4 sm:items-center">
+          <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl max-h-[85vh] overflow-hidden">
+            <div className="border-b border-slate-200 px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                    Oefening wisselen
+                  </p>
+                  <h3 className="text-base font-semibold text-slate-900">
+                    {swapTarget.currentName}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeSwapModal}
+                  className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+                >
+                  Sluiten
+                </button>
+              </div>
+              <input
+                type="text"
+                autoFocus
+                value={swapQuery}
+                onChange={(e) => setSwapQuery(e.target.value)}
+                placeholder="Zoek oefening..."
+                className="mt-3 h-11 w-full rounded-xl border border-slate-200 px-3 text-base text-slate-900 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+              />
+            </div>
+
+            <ul className="max-h-[58vh] overflow-y-auto p-2">
+              {allExercises
+                .filter((ex) => ex.id !== blocks
+                  .find((b) => b.key === swapTarget.blockKey)
+                  ?.exercises.find((slot) => slot.slotKey === swapTarget.slotKey)
+                  ?.exerciseId)
+                .filter((ex) => {
+                  const q = swapQuery.trim().toLowerCase()
+                  return !q || ex.name.toLowerCase().includes(q) || String(ex.category ?? '').toLowerCase().includes(q)
+                })
+                .map((alt) => (
+                  <li key={alt.id}>
+                    <button
+                      type="button"
+                      className="w-full rounded-xl px-3 py-3 text-left hover:bg-slate-50 active:bg-slate-100"
+                      onClick={() =>
+                        void swapExercise(swapTarget.blockKey, swapTarget.slotKey, alt)
+                      }
+                    >
+                      <span className="block text-base font-medium text-slate-900">{alt.name}</span>
+                      {alt.category ? (
+                        <span className="block text-xs text-slate-400">{alt.category}</span>
+                      ) : null}
+                    </button>
+                  </li>
+                ))}
+            </ul>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
