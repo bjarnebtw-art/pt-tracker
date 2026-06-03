@@ -1,9 +1,9 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, PlusCircle, Users, LogOut } from 'lucide-react'
+import { LayoutDashboard, PlusCircle, Users, Settings, LogOut } from 'lucide-react'
 
 const linkClass = ({ isActive }) =>
   [
-    'flex min-h-[56px] flex-1 flex-col items-center justify-center gap-1 px-2 py-2 text-xs font-medium transition-colors',
+    'flex min-h-[56px] flex-1 flex-col items-center justify-center gap-1 px-1 py-2 text-[11px] font-medium transition-colors',
     isActive ? 'text-slate-900' : 'text-slate-500 hover:text-slate-700',
   ].join(' ')
 
@@ -21,7 +21,7 @@ export default function Navbar({ signOut }) {
 
         <NavLink to="/new-session" className={linkClass} title="Nieuwe training">
           <PlusCircle className="h-5 w-5 shrink-0" aria-hidden />
-          <span>Nieuwe training</span>
+          <span>Training</span>
         </NavLink>
 
         <NavLink to="/clients" className={linkClass} title="Klanten">
@@ -29,10 +29,15 @@ export default function Navbar({ signOut }) {
           <span>Klanten</span>
         </NavLink>
 
+        <NavLink to="/manage" className={linkClass} title="Beheer">
+          <Settings className="h-5 w-5 shrink-0" aria-hidden />
+          <span>Beheer</span>
+        </NavLink>
+
         <button
           type="button"
           onClick={() => void signOut()}
-          className="flex min-h-[56px] flex-1 flex-col items-center justify-center gap-1 px-2 py-2 text-xs font-medium text-slate-500 transition-colors hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-slate-900/10"
+          className="flex min-h-[56px] flex-1 flex-col items-center justify-center gap-1 px-1 py-2 text-[11px] font-medium text-slate-500 transition-colors hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-slate-900/10"
           title="Uitloggen"
         >
           <LogOut className="h-5 w-5 shrink-0" aria-hidden />
