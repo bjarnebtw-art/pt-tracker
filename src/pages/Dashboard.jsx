@@ -125,13 +125,41 @@ export default function Dashboard() {
                 <p className="mt-2 text-xs font-medium uppercase tracking-wide text-slate-500">
                   {statusLabel(s.status)}
                 </p>
-                <button
-                  type="button"
-                  onClick={() => navigate(`/session/${s.id}`)}
-                  className="mt-4 w-full min-h-[44px] rounded-lg border border-slate-200 bg-slate-50 px-4 text-sm font-medium text-slate-900 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
-                >
-                  Open training
-                </button>
+              <div className="mt-4 flex gap-2">
+  <button
+    type="button"
+    onClick={() => navigate(`/session/${s.id}`)}
+    className="flex-1 min-h-[44px] rounded-lg border border-slate-200 bg-slate-50 px-4 text-sm font-medium text-slate-900"
+  >
+    Open training
+  </button>
+
+  <button
+    type="button"
+    onClick={async () => {
+      if (!window.confirm('Training verwijderen?')) return
+
+      try {
+        await supabase
+          .from('session_exercises')
+          .delete()
+          .eq('session_id', s.id)
+
+        await supabase
+          .from('sessions')
+          .delete()
+          .eq('id', s.id)
+
+        load()
+      } catch (err) {
+        alert(err.message)
+      }
+    }}
+    className="min-h-[44px] rounded-lg bg-red-600 px-4 text-sm font-medium text-white"
+  >
+    🗑
+  </button>
+</div>
               </li>
             ))}
           </ul>
