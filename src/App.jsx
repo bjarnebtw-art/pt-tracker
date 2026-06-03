@@ -8,6 +8,7 @@ import SessionLog from './pages/SessionLog'
 import GroupSession from './pages/GroupSession'
 import ClientProgress from './pages/ClientProgress'
 import ClientList from './pages/ClientList'
+import Manage from './pages/Manage'
 
 function AppShell({ signOut }) {
   return (
@@ -48,6 +49,7 @@ export default function App() {
         <Route path="new-session" element={<NewSession />} />
         <Route path="group-session" element={<GroupSession />} />
         <Route path="clients" element={<ClientList />} />
+        <Route path="manage" element={<Manage />} />
         <Route path="session/:id" element={<SessionLog />} />
         <Route path="client/:clientId/progress" element={<ClientProgress />} />
       </Route>
