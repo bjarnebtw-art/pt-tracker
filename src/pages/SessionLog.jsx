@@ -114,6 +114,7 @@ export default function SessionLog() {
   const [rows, setRows] = useState([])
   const [sessionStatus, setSessionStatus] = useState(null)
   const [sessionClientId, setSessionClientId] = useState(null)
+  const [sessionNotes, setSessionNotes] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [saveError, setSaveError] = useState('')
