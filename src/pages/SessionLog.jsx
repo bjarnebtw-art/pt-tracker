@@ -85,12 +85,7 @@ function groupRowsIntoExercises(rowList) {
 
 function initialFieldForRow(row, totalSets) {
   const setNum = Number(row.set_number) || 1
-  const reps =
-  row.reps_done != null
-    ? String(row.reps_done)
-    : row.target_reps != null
-      ? String(row.target_reps)
-      : ''
+  const reps = row.reps_done != null ? String(row.reps_done) : ''
   if (row.weight_done != null) {
     return { weight: String(row.weight_done), reps }
   }
@@ -196,6 +191,7 @@ export default function SessionLog() {
       }
       setSessionStatus(sRes.data.status)
       setSessionClientId(sRes.data.client_id)
+      setSessionNotes(sRes.data.notes || '')
       const list = rRes.data || []
       setRows(list)
       rebuildFieldsAndMeta(list)
@@ -360,6 +356,22 @@ export default function SessionLog() {
     }
   }
 
+
+  async function saveSessionNotes(value) {
+    if (!sessionId) return
+
+    try {
+      const { error: noteErr } = await supabase
+        .from('sessions')
+        .update({ notes: value.trim() || null })
+        .eq('id', sessionId)
+
+      if (noteErr) throw noteErr
+    } catch (e) {
+      setSaveError(e?.message || 'Notitie opslaan mislukt.')
+    }
+  }
+
   async function handleFinish() {
     if (!sessionId || finishing) return
     setFinishing(true)
@@ -450,6 +462,21 @@ export default function SessionLog() {
             {saveError}
           </div>
         ) : null}
+
+        <div className="mb-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <label className="mb-1 block text-sm font-semibold text-slate-900">
+            Algemene notitie
+          </label>
+          <textarea
+            rows={2}
+            disabled={isDone}
+            value={sessionNotes}
+            onChange={(e) => setSessionNotes(e.target.value)}
+            onBlur={(e) => void saveSessionNotes(e.target.value)}
+            placeholder="Bijv. slecht geslapen, spierpijn, pijnklacht, van trapje gevallen..."
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 disabled:bg-slate-100"
+          />
+        </div>
 
         {isDone ? (
           <p className="mb-4 text-sm text-slate-500">Deze training is afgerond (alleen lezen).</p>
