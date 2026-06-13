@@ -85,7 +85,12 @@ function groupRowsIntoExercises(rowList) {
 
 function initialFieldForRow(row, totalSets) {
   const setNum = Number(row.set_number) || 1
-  const reps = row.reps_done != null ? String(row.reps_done) : ''
+  const reps =
+  row.reps_done != null
+    ? String(row.reps_done)
+    : row.target_reps != null
+      ? String(row.target_reps)
+      : ''
   if (row.weight_done != null) {
     return { weight: String(row.weight_done), reps }
   }
