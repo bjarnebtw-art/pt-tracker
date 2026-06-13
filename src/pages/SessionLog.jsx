@@ -163,7 +163,7 @@ export default function SessionLog() {
     setError('')
     try {
       const [sRes, rRes] = await Promise.all([
-        supabase.from('sessions').select('id, status, client_id').eq('id', sessionId).maybeSingle(),
+        supabase.from('sessions').select('id, status, client_id, notes').eq('id', sessionId).maybeSingle(),
         supabase
           .from('session_exercises')
           .select(
