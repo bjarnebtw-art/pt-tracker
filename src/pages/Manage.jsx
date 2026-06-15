@@ -41,6 +41,7 @@ export default function Manage() {
 
   const [exerciseForm, setExerciseForm] = useState({ id: null, name: '', category: 'Other', equipmentText: '', video_url: '' })
   const [exerciseSearch, setExerciseSearch] = useState('')
+  const [exerciseEditOpen, setExerciseEditOpen] = useState(false)
 
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
   const [templateForm, setTemplateForm] = useState({ name: '', type: 'Full Body', duration_min: 60, notes: '' })
@@ -91,6 +92,7 @@ export default function Manage() {
 
   function resetExerciseForm() {
     setExerciseForm({ id: null, name: '', category: 'Other', equipmentText: '', video_url: '' })
+    setExerciseEditOpen(false)
   }
 
   function editExercise(ex) {
@@ -103,7 +105,7 @@ export default function Manage() {
       video_url: ex.video_url || '',
     })
     setTab('exercises')
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    setExerciseEditOpen(true)
   }
 
   async function saveExercise(e) {
@@ -526,6 +528,86 @@ export default function Manage() {
           </section>
         </div>
       ) : null}
+
+      {exerciseEditOpen ? (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/40 px-3 pb-3 sm:items-center sm:pb-0">
+          <section className="w-full max-w-lg rounded-2xl bg-white p-4 shadow-xl">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Oefening bewerken</h2>
+                <p className="mt-1 text-sm text-slate-500">Pas naam, categorie, equipment of video aan.</p>
+              </div>
+              <button
+                type="button"
+                onClick={resetExerciseForm}
+                className="rounded-lg px-2 py-1 text-sm font-medium text-slate-500 hover:bg-slate-100"
+              >
+                Sluiten
+              </button>
+            </div>
+
+            <form onSubmit={saveExercise} className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Naam</label>
+                <input
+                  autoFocus
+                  value={exerciseForm.name}
+                  onChange={(e) => setExerciseForm((f) => ({ ...f, name: e.target.value }))}
+                  className="w-full min-h-[46px] rounded-xl border border-slate-200 px-3 text-base focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Categorie</label>
+                <select
+                  value={exerciseForm.category}
+                  onChange={(e) => setExerciseForm((f) => ({ ...f, category: e.target.value }))}
+                  className="w-full min-h-[46px] rounded-xl border border-slate-200 bg-white px-3 text-base focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                >
+                  {CATEGORIES.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Equipment</label>
+                <input
+                  value={exerciseForm.equipmentText}
+                  onChange={(e) => setExerciseForm((f) => ({ ...f, equipmentText: e.target.value }))}
+                  placeholder="Bijv. barbell, dumbbell"
+                  className="w-full min-h-[46px] rounded-xl border border-slate-200 px-3 text-base focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Video URL optioneel</label>
+                <input
+                  value={exerciseForm.video_url}
+                  onChange={(e) => setExerciseForm((f) => ({ ...f, video_url: e.target.value }))}
+                  placeholder="https://..."
+                  className="w-full min-h-[46px] rounded-xl border border-slate-200 px-3 text-base focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="submit"
+                  className="min-h-[46px] flex-1 rounded-xl bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800"
+                >
+                  Opslaan
+                </button>
+                <button
+                  type="button"
+                  onClick={resetExerciseForm}
+                  className="min-h-[46px] rounded-xl border border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Annuleren
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
+
     </main>
   )
 }
