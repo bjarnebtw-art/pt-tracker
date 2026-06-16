@@ -54,8 +54,11 @@ export default function Manage() {
   const [templateRows, setTemplateRows] = useState([])
 
   const [exerciseForm, setExerciseForm] = useState({ id: null, name: '', category: 'Other', equipmentText: '', video_url: '' })
-  const [editingExercise, setEditingExercise] = useState(null)
   const [exerciseSearch, setExerciseSearch] = useState('')
+
+  const [editingExercise, setEditingExercise] = useState(null)
+  const [editExerciseForm, setEditExerciseForm] = useState({ id: null, name: '', category: 'Other', equipmentText: '', video_url: '' })
+  const [savingEditExercise, setSavingEditExercise] = useState(false)
 
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
   const [templateForm, setTemplateForm] = useState({ name: '', type: 'Full Body', duration_min: 60, notes: '' })
@@ -102,14 +105,69 @@ export default function Manage() {
     setExerciseForm({ id: null, name: '', category: 'Other', equipmentText: '', video_url: '' })
   }
 
-  function openEditExercise(ex) {
-    setEditingExercise({
+  function openExerciseEditor(ex) {
+    setError('')
+    setNotice('')
+    setEditingExercise(ex)
+    setEditExerciseForm({
       id: ex.id,
       name: ex.name || '',
       category: ex.category || 'Other',
       equipmentText: equipmentToText(ex.equipment),
       video_url: ex.video_url || '',
     })
+  }
+
+  function closeExerciseEditor() {
+    if (savingEditExercise) return
+    setEditingExercise(null)
+    setEditExerciseForm({ id: null, name: '', category: 'Other', equipmentText: '', video_url: '' })
+  }
+
+  async function saveEditExercise() {
+    if (savingEditExercise) return
+    setError('')
+    setNotice('')
+
+    const id = editExerciseForm.id
+    const name = editExerciseForm.name.trim()
+    if (!id) {
+      setError('Geen oefening geselecteerd om aan te passen.')
+      return
+    }
+    if (!name) {
+      setError('Vul een oefeningnaam in.')
+      return
+    }
+
+    setSavingEditExercise(true)
+    try {
+      const payload = {
+        name,
+        category: valueOrNull(editExerciseForm.category),
+        equipment: equipmentFromText(editExerciseForm.equipmentText),
+        video_url: valueOrNull(editExerciseForm.video_url.trim()),
+      }
+
+      const { data, error: updateErr } = await supabase
+        .from('exercises')
+        .update(payload)
+        .eq('id', id)
+        .select('id')
+
+      if (updateErr) throw updateErr
+      if (!data || data.length === 0) {
+        throw new Error('Geen oefening aangepast. Controleer of update-permissies in Supabase goed staan.')
+      }
+
+      setNotice('Oefening aangepast.')
+      closeExerciseEditor()
+      await loadAll()
+    } catch (e) {
+      setError(e?.message || 'Oefening aanpassen mislukt.')
+    } finally {
+      setSavingEditExercise(false)
+    }
   }
 
   async function saveExercise(e) {
@@ -130,52 +188,13 @@ export default function Manage() {
     }
 
     try {
-      const { error: sErr } = exerciseForm.id
-        ? await supabase.from('exercises').update(payload).eq('id', exerciseForm.id)
-        : await supabase.from('exercises').insert(payload)
+      const { error: sErr } = await supabase.from('exercises').insert(payload)
       if (sErr) throw sErr
       resetExerciseForm()
-      setNotice(exerciseForm.id ? 'Oefening aangepast.' : 'Oefening toegevoegd.')
+      setNotice('Oefening toegevoegd.')
       await loadAll()
     } catch (e) {
       setError(e?.message || 'Oefening opslaan mislukt.')
-    }
-  }
-
-  async function saveEditedExercise(e) {
-    e.preventDefault()
-    if (!editingExercise?.id) return
-    setError('')
-    setNotice('')
-
-    const name = editingExercise.name.trim()
-    if (!name) {
-      setError('Vul een oefeningnaam in.')
-      return
-    }
-
-    const payload = {
-      name,
-      category: valueOrNull(editingExercise.category),
-      equipment: equipmentFromText(editingExercise.equipmentText),
-      video_url: valueOrNull(editingExercise.video_url.trim()),
-    }
-
-    try {
-      const { data, error: sErr } = await supabase
-        .from('exercises')
-        .update(payload)
-        .eq('id', editingExercise.id)
-        .select('id, name')
-
-      if (sErr) throw sErr
-      if (!data || data.length === 0) throw new Error('Geen oefening aangepast. Check RLS update policy.')
-
-      setEditingExercise(null)
-      setNotice('Oefening aangepast.')
-      await loadAll()
-    } catch (e) {
-      setError(e?.message || 'Oefening aanpassen mislukt.')
     }
   }
 
@@ -416,7 +435,7 @@ export default function Manage() {
                     <p className="text-sm font-medium text-slate-900">{ex.name}</p>
                     <p className="text-xs text-slate-500">{ex.category || 'Geen categorie'}</p>
                   </div>
-                  <button type="button" onClick={() => openEditExercise(ex)} className="min-h-[36px] rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                  <button type="button" onClick={() => openExerciseEditor(ex)} className="min-h-[36px] rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">
                     Bewerk
                   </button>
                 </li>
@@ -557,72 +576,78 @@ export default function Manage() {
       ) : null}
 
       {editingExercise ? (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/40 px-3 pb-[calc(5rem+env(safe-area-inset-bottom))] pt-4 sm:flex sm:items-center sm:justify-center sm:pb-4">
-          <div className="mx-auto w-full max-w-md rounded-2xl bg-white p-4 shadow-xl">
+        <div className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-900/40 px-3 py-3 sm:items-center">
+          <div className="max-h-[calc(100svh-7.5rem)] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-4 pb-8 shadow-xl sm:max-h-[90vh]">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
-                <h3 className="text-lg font-bold text-slate-900">Oefening aanpassen</h3>
-                <p className="text-sm text-slate-500">Wijzig naam, categorie, equipment of video.</p>
+                <h3 className="text-xl font-bold text-slate-900">Oefening aanpassen</h3>
+                <p className="mt-1 text-sm text-slate-500">Wijzig naam, categorie, equipment of video.</p>
               </div>
               <button
                 type="button"
-                onClick={() => setEditingExercise(null)}
+                onClick={closeExerciseEditor}
                 className="rounded-lg px-2 py-1 text-sm font-medium text-slate-500 hover:bg-slate-100"
               >
                 Sluiten
               </button>
             </div>
 
-            <form onSubmit={saveEditedExercise} className="space-y-4 pb-2">
+            <div className="space-y-4">
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">Naam</label>
                 <input
-                  value={editingExercise.name}
-                  onChange={(e) => setEditingExercise((f) => ({ ...f, name: e.target.value }))}
+                  value={editExerciseForm.name}
+                  onChange={(e) => setEditExerciseForm((f) => ({ ...f, name: e.target.value }))}
                   className="w-full min-h-[46px] rounded-xl border border-slate-200 px-3 text-base focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
                 />
               </div>
-
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">Categorie</label>
                 <select
-                  value={editingExercise.category}
-                  onChange={(e) => setEditingExercise((f) => ({ ...f, category: e.target.value }))}
+                  value={editExerciseForm.category}
+                  onChange={(e) => setEditExerciseForm((f) => ({ ...f, category: e.target.value }))}
                   className="w-full min-h-[46px] rounded-xl border border-slate-200 bg-white px-3 text-base focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
                 >
                   {CATEGORIES.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
                 </select>
               </div>
-
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">Equipment</label>
                 <input
-                  value={editingExercise.equipmentText}
-                  onChange={(e) => setEditingExercise((f) => ({ ...f, equipmentText: e.target.value }))}
+                  value={editExerciseForm.equipmentText}
+                  onChange={(e) => setEditExerciseForm((f) => ({ ...f, equipmentText: e.target.value }))}
                   placeholder="Bijv. barbell, dumbbell"
                   className="w-full min-h-[46px] rounded-xl border border-slate-200 px-3 text-base focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
                 />
               </div>
-
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">Video URL optioneel</label>
                 <input
-                  value={editingExercise.video_url}
-                  onChange={(e) => setEditingExercise((f) => ({ ...f, video_url: e.target.value }))}
+                  value={editExerciseForm.video_url}
+                  onChange={(e) => setEditExerciseForm((f) => ({ ...f, video_url: e.target.value }))}
                   placeholder="https://..."
                   className="w-full min-h-[46px] rounded-xl border border-slate-200 px-3 text-base focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
                 />
               </div>
 
-              <div className="sticky bottom-0 -mx-4 flex gap-2 border-t border-slate-100 bg-white px-4 pb-1 pt-3">
-                <button type="submit" className="min-h-[46px] flex-1 rounded-xl bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800">
-                  Opslaan
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  disabled={savingEditExercise}
+                  onClick={() => void saveEditExercise()}
+                  className="min-h-[46px] flex-1 rounded-xl bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                >
+                  {savingEditExercise ? 'Opslaan…' : 'Opslaan'}
                 </button>
-                <button type="button" onClick={() => setEditingExercise(null)} className="min-h-[46px] rounded-xl border border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                <button
+                  type="button"
+                  onClick={closeExerciseEditor}
+                  className="min-h-[46px] rounded-xl border border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
                   Annuleren
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       ) : null}
