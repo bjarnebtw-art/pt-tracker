@@ -557,8 +557,8 @@ export default function Manage() {
       ) : null}
 
       {editingExercise ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 px-3 pb-3 sm:items-center sm:pb-0">
-          <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-xl">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/40 px-3 pb-[calc(5rem+env(safe-area-inset-bottom))] pt-4 sm:flex sm:items-center sm:justify-center sm:pb-4">
+          <div className="mx-auto w-full max-w-md rounded-2xl bg-white p-4 shadow-xl">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-lg font-bold text-slate-900">Oefening aanpassen</h3>
@@ -573,7 +573,7 @@ export default function Manage() {
               </button>
             </div>
 
-            <form onSubmit={saveEditedExercise} className="space-y-4">
+            <form onSubmit={saveEditedExercise} className="space-y-4 pb-2">
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">Naam</label>
                 <input
@@ -614,7 +614,7 @@ export default function Manage() {
                 />
               </div>
 
-              <div className="flex gap-2 pt-1">
+              <div className="sticky bottom-0 -mx-4 flex gap-2 border-t border-slate-100 bg-white px-4 pb-1 pt-3">
                 <button type="submit" className="min-h-[46px] flex-1 rounded-xl bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800">
                   Opslaan
                 </button>
@@ -629,4 +629,3 @@ export default function Manage() {
     </main>
   )
 }
-
