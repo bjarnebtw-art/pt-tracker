@@ -10,6 +10,7 @@ import {
   YAxis,
 } from 'recharts'
 import { supabase } from '../lib/supabase'
+import TrainingHistory from '../components/TrainingHistory'
 
 const CHART_BLUE = '#3B82F6'
 
@@ -312,7 +313,10 @@ export default function ClientProgress() {
         </div>
       ) : null}
 
+      <TrainingHistory key={clientId} clientId={clientId} />
+
       <div className="mt-8">
+        <h2 className="mb-3 text-lg font-semibold text-slate-900">Krachtprogressie</h2>
         <label htmlFor="cp-exercise" className="block text-sm font-medium text-slate-700">
           Oefening
         </label>
